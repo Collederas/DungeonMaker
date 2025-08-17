@@ -5,7 +5,7 @@
 const FIntVector Pathfinder3D::Neighbours[12] =
 {
 	// FLAT MOVES (Z is 0)
-	// These are always single-tile steps to ensure contiguous hallways.
+	// These are always single tile steps to ensure contiguous hallways.
 	{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0},
 
 	// STAIR MOVES (Z is not 0)
@@ -186,7 +186,7 @@ TArray<FIntVector> Pathfinder3D::FindPath(FIntVector Start, FIntVector End, TFun
 
 	while (Step() == EPathStatus::InProgress)
 	{
-		// This loop runs at full speed, without timers or VLog frames.
+		// This loop runs at full speed
 	}
 	
 	return GetFinalPath();
