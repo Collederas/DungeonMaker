@@ -41,29 +41,29 @@ EPathStatus Pathfinder3D::Step()
 		return EPathStatus::Failed;
 	}
 
-	FPathNode* Node = OpenQueue.Pop();
-	ClosedList.Add(Node);
+	CurrentNode = OpenQueue.Pop();
+	ClosedList.Add(CurrentNode);
 
-	const FVector ClosedWorldPos = GridToWorldFunc(Node->Position);
+	const FVector ClosedWorldPos = GridToWorldFunc(CurrentNode->Position);
 	UE_VLOG_BOX(OwnerContext, LogDungeonMaker, Verbose, FBox(ClosedWorldPos - 40.f, ClosedWorldPos + 40.f), FColor::Red, TEXT("Closed"));
 
-	const FVector NodeWorldPos = this->GridToWorldFunc(Node->Position);
+	const FVector NodeWorldPos = this->GridToWorldFunc(CurrentNode->Position);
 	UE_VLOG_BOX(OwnerContext, LogDungeonMaker, Verbose, FBox(NodeWorldPos - 50.f, NodeWorldPos + 50.f), FColor::Orange, TEXT("Current"));
 
-	if (Node->Previous)
+	if (CurrentNode->Previous)
 	{
-		const FVector PrevWorldPos = this->GridToWorldFunc(Node->Previous->Position);
+		const FVector PrevWorldPos = this->GridToWorldFunc(CurrentNode->Previous->Position);
 		UE_VLOG_ARROW(OwnerContext, LogDungeonMaker, Verbose, NodeWorldPos, PrevWorldPos, FColor::White, TEXT(""));
 	}
 
-	if (Node->Position == GoalNode->Position)
+	if (CurrentNode->Position == GoalNode->Position)
 	{
 		return EPathStatus::Succeeded;
 	}
 
-	for (FIntVector StairOffset : StairPaddedNeighbours)
+	for (FIntVector StairOffset : Neighbours)
 	{
-		FIntVector NeighborPos = Node->Position + StairOffset;
+		FIntVector NeighborPos = CurrentNode->Position + StairOffset;
 		if (!Grid.InBounds(NeighborPos))
 		{
 			continue;
@@ -72,14 +72,14 @@ EPathStatus Pathfinder3D::Step()
 		FPathNode* NeighborNode = &Grid(NeighborPos);
 
 		if (ClosedList.Contains(NeighborNode)) continue; // Node has been fully evaluated and its cost is known
-		if (Node->TraversalHistory.Contains(NeighborPos)) continue;
+		if (CurrentNode->TraversalHistory.Contains(NeighborPos)) continue;
 
 		// Log the neighbor being considered as a Yellow box.
 		const FVector NeighborWorldPos = this->GridToWorldFunc(NeighborNode->Position);
 		UE_VLOG_BOX(OwnerContext, LogDungeonMaker, Verbose, FBox(NeighborWorldPos - 25.f, NeighborWorldPos + 25.f), FColor::Yellow, TEXT("Neighbor"));
 
 		// returns the cost to step to the neighbor 
-		FPathCost CostToNeighbor = CurrentCostFunction(NeighborNode, Node);
+		FPathCost CostToNeighbor = CurrentCostFunction(NeighborNode, CurrentNode);
 		if (!CostToNeighbor.bTraversable) continue;
 
 		if (CostToNeighbor.bIsStairs)
@@ -87,16 +87,16 @@ EPathStatus Pathfinder3D::Step()
 			// If neighbor is stairs and we already visited them, we skip. (stairs are 2x2 + 1 unit of padding for landings that is supposed to be traversable)
 			FIntVector HorizontalOffset(FMath::Clamp(StairOffset.X, -1, 1), FMath::Clamp(StairOffset.Y, -1, 1), 0);
 			FIntVector VerticalOffset(0, 0, StairOffset.Z);
-			if (Node->TraversalHistory.Contains(Node->Position + HorizontalOffset) ||
-				Node->TraversalHistory.Contains(Node->Position + HorizontalOffset * 2) ||
-				Node->TraversalHistory.Contains(Node->Position + VerticalOffset + HorizontalOffset) ||
-				Node->TraversalHistory.Contains(Node->Position + VerticalOffset + HorizontalOffset * 2))
+			if (CurrentNode->TraversalHistory.Contains(CurrentNode->Position + HorizontalOffset) ||
+				CurrentNode->TraversalHistory.Contains(CurrentNode->Position + HorizontalOffset * 2) ||
+				CurrentNode->TraversalHistory.Contains(CurrentNode->Position + VerticalOffset + HorizontalOffset) ||
+				CurrentNode->TraversalHistory.Contains(CurrentNode->Position + VerticalOffset + HorizontalOffset * 2))
 			{
 				continue;
 			}
 		}
 
-		float NewCost = CostToNeighbor.Cost + Node->Cost; // New path cost to reach neighbor
+		float NewCost = CostToNeighbor.Cost + CurrentNode->Cost; // New path cost to reach neighbor
 
 		// If the cost of reaching this neighbor through the current path (NewCost) is less than
 		// any cost we’ve previously recorded for that neighbor (NeighborNode->Cost),
@@ -109,15 +109,15 @@ EPathStatus Pathfinder3D::Step()
 				UE_VLOG_BOX(OwnerContext, LogDungeonMaker, Verbose, FBox(NeighborWorldPos - 25.f, NeighborWorldPos + 25.f), FColor::Green, TEXT("Visited"));
 			}
 
-			NeighborNode->Previous = Node;
+			NeighborNode->Previous = CurrentNode;
 			NeighborNode->Cost = NewCost;
 
 			UE_LOG(LogDungeonMaker, Log, TEXT("Queue contains %d nodes"), OpenQueue.Num());
 
 			OpenQueue.Update(NeighborNode);
 
-			NeighborNode->TraversalHistory = Node->TraversalHistory;
-			NeighborNode->TraversalHistory.Add(Node->Position);
+			NeighborNode->TraversalHistory = CurrentNode->TraversalHistory;
+			NeighborNode->TraversalHistory.Add(CurrentNode->Position);
 
 			// ...and if see the neighbor is a staircase then we marke it all traversed (excl. landing)
 			if (CostToNeighbor.bIsStairs)
@@ -125,10 +125,10 @@ EPathStatus Pathfinder3D::Step()
 				FIntVector HorizontalOffset(FMath::Clamp(StairOffset.X, -1, 1), FMath::Clamp(StairOffset.Y, -1, 1), 0);
 				FIntVector VerticalOffset(0, 0, StairOffset.Z);
 
-				NeighborNode->TraversalHistory.Add(Node->Position + HorizontalOffset);
-				NeighborNode->TraversalHistory.Add(Node->Position + HorizontalOffset * 2);
-				NeighborNode->TraversalHistory.Add(Node->Position + VerticalOffset + HorizontalOffset);
-				NeighborNode->TraversalHistory.Add(Node->Position + VerticalOffset + HorizontalOffset * 2);
+				NeighborNode->TraversalHistory.Add(CurrentNode->Position + HorizontalOffset);
+				NeighborNode->TraversalHistory.Add(CurrentNode->Position + HorizontalOffset * 2);
+				NeighborNode->TraversalHistory.Add(CurrentNode->Position + VerticalOffset + HorizontalOffset);
+				NeighborNode->TraversalHistory.Add(CurrentNode->Position + VerticalOffset + HorizontalOffset * 2);
 			}
 		}
 	}

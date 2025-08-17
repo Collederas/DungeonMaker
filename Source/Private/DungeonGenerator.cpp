@@ -18,15 +18,14 @@ ADungeonGenerator::ADungeonGenerator()
 	RoomISM->SetupAttachment(RootComponent);
 	HallwayISM->SetupAttachment(RootComponent);
 	StairsISM->SetupAttachment(RootComponent);
+
+	DebugCurrentPathISM = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("DebugCurrentPathISM"));
+	DebugCurrentPathISM->SetupAttachment(RootComponent);
 }
 
 void ADungeonGenerator::ClearDungeon()
 {
-	for (AActor* Actor : SpawnedActors)
-	{
-		if (Actor) Actor->Destroy();
-	}
-	SpawnedActors.Empty();
+
 	DelaunayEdges.Empty();
 	MstEdges.Empty();
 	HallwayEdges.Empty();
@@ -35,9 +34,7 @@ void ADungeonGenerator::ClearDungeon()
 	RoomTiles.Empty();
 	HallwayTiles.Empty();
 	DungeonRooms.Empty();
-
-	RemovedCornerPositions.Empty();
-
+	
 	RoomISM->ClearInstances();
 	HallwayISM->ClearInstances();
 	StairsISM->ClearInstances();
@@ -51,31 +48,14 @@ void ADungeonGenerator::ClearDungeon()
 void ADungeonGenerator::GenerateDungeon()
 {
 	ClearDungeon();
-	if (!RoomFloorMesh || !WallMesh || !HallwayFloorMesh)
-	{
-		return;
-	}
-
-	Grid = FGrid3D<ECellType>(FIntVector(GridSize.X, GridSize.Y, NumberOfFloors),
+	Grid = FGrid3D<ECellType>(FIntVector(GridSize.X, GridSize.Y, GridSize.Z),
 	                          [](const FIntVector& Pos) { return ECellType::None; }, FIntVector::ZeroValue);
-
-	// 1. Place Rooms in 3D
 	PlaceRooms();
-
-	// 2. Calculate connectivity graph using 3D tetrahedralization
 	CalculateDelaunayTetrahedralization();
 	CalculateMst();
 	CreateHallways();
 
-
-	// 3. Spawn all the actors
-	// UWorld* World = GetWorld();
-	// if (!World) return;
-	// for (int32 i = 0; i < PlacedRooms.Num(); ++i)
-	// {
-	// 	SpawnRoomActors(World, PlacedRooms[i], i);
-	// }
-	// SpawnHallwayWalls(); // Spawn hallway walls after rooms are built
+	UE_LOG(LogDungeonMaker, Verbose, TEXT("Created dungeon with: %d rooms on %d floors"), DungeonRooms.Num(), GridSize.Z);
 };
 
 void ADungeonGenerator::PlaceRooms()
@@ -95,9 +75,9 @@ void ADungeonGenerator::PlaceRooms()
 		const int32 RoomX = FMath::RandRange(0, GridSize.X - RoomWidth);
 		const int32 RoomY = FMath::RandRange(0, GridSize.Y - RoomDepth);
 
-		const int32 StartFloor = FMath::RandRange(0, NumberOfFloors - 1);
+		const int32 StartFloor = FMath::RandRange(0, GridSize.Z - 1);
 		int32 NumFloors = FMath::RandRange(RoomHeightInFloorsMinMax.X, RoomHeightInFloorsMinMax.Y);
-		if (StartFloor + NumFloors > NumberOfFloors) NumFloors = NumberOfFloors - StartFloor;
+		if (StartFloor + NumFloors > GridSize.Z) NumFloors = GridSize.Z - StartFloor;
 
 		FDungeonRoomBox NewRoomBox(
 			FIntVector(RoomX, RoomY, StartFloor),
@@ -109,8 +89,8 @@ void ADungeonGenerator::PlaceRooms()
 		for (const FDungeonRoom& Room : DungeonRooms)
 		{
 			FDungeonRoomBox PaddedBox = Room.Bounds;
-			PaddedBox.Min -= FIntVector(1, 1, 1);
-			PaddedBox.Max += FIntVector(1, 1, 1);
+			PaddedBox.Min -= FIntVector(1, 1, 0);
+			PaddedBox.Max += FIntVector(1, 1, 0);
 			if (PaddedBox.Intersect(NewRoomBox))
 			{
 				bOverlaps = true;
@@ -187,7 +167,6 @@ FPathCost ADungeonGenerator::CalculateHallwayPathCost(const FPathNode* Current, 
 	else
 	{
 		// if Delta is vertical, then we have a staircase
-
 		const ECellType CurrentNodeType = Grid(Current->Position);
 		const ECellType NeighborNodeType = Grid(Neighbor->Position);
 		if ((CurrentNodeType != ECellType::None && CurrentNodeType != ECellType::Hallway) ||
@@ -196,8 +175,7 @@ FPathCost ADungeonGenerator::CalculateHallwayPathCost(const FPathNode* Current, 
 			return PathCost; // Not traversable
 		}
 
-		PathCost.Cost = 100 + FVector::Dist(FVector(Neighbor->Position), FVector(GoalRoom.GridCenter));
-		//base cost + heuristic
+		PathCost.Cost = 100 + FVector::Dist(FVector(Neighbor->Position), FVector(GoalRoom.GridCenter)); //base cost + heuristic
 
 		// Check if there's enough space for a 2x2 stairwell landing
 		const int32 XDir = FMath::Clamp(Delta.X, -1, 1);
@@ -224,170 +202,6 @@ FPathCost ADungeonGenerator::CalculateHallwayPathCost(const FPathNode* Current, 
 		PathCost.bIsStairs = true;
 	}
 	return PathCost;
-}
-
-
-void ADungeonGenerator::SpawnRoomActors(UWorld* World, const FDungeonRoomBox& RoomBox, int32 RoomIndex)
-{
-	const FVector GeneratorOffset = GetActorLocation();
-
-	auto SpawnMesh = [&](UStaticMesh* Mesh, const FVector& Location, const FRotator& Rotation, const FVector& Scale, const FString& Name)
-	{
-		if (!Mesh) return;
-		AStaticMeshActor* Actor = World->SpawnActor<AStaticMeshActor>();
-		if (Actor)
-		{
-			Actor->GetStaticMeshComponent()->SetStaticMesh(Mesh);
-			Actor->SetActorLocation(Location);
-			Actor->SetActorRotation(Rotation);
-			Actor->SetActorScale3D(Scale);
-			Actor->SetActorLabel(Name);
-			SpawnedActors.Add(Actor);
-		}
-	};
-
-	const FIntVector RoomGridSize(RoomBox.Max.X - RoomBox.Min.X, RoomBox.Max.Y - RoomBox.Min.Y, RoomBox.Max.Z - RoomBox.Min.Z);
-
-	// 1. Spawn Floors
-	for (int32 z = RoomBox.Min.Z; z < RoomBox.Max.Z; ++z)
-	{
-		if (RoomBox.Max.Z - RoomBox.Min.Z == 1) // If multi-floor then we dont spawn floor
-		{
-			FVector FloorCenterLocation = FVector(
-				(RoomBox.Min.X + RoomGridSize.X / 2.0f) * GridUnitSize,
-				(RoomBox.Min.Y + RoomGridSize.Y / 2.0f) * GridUnitSize,
-				z * FloorHeight) + GeneratorOffset;
-			SpawnMesh(RoomFloorMesh, FloorCenterLocation, FRotator::ZeroRotator, FVector(RoomGridSize.X, RoomGridSize.Y, 1.0f),
-			          FString::Printf(TEXT("RoomFloor_%d_%d"), RoomIndex, z));
-		}
-	}
-
-	// 2. Spawn Walls for each level in the room
-	const FRotator HorizontalWallRotation = FRotator(0.0f, 90.0f, 0.0f);
-	for (int32 z = RoomBox.Min.Z; z < RoomBox.Max.Z; ++z)
-	{
-		// Get the Z coordinate for the base of the current floor
-		const float FloorBaseZ = z * FloorHeight;
-
-		for (float h = 0.0f; h < FloorHeight; h += GridUnitSize)
-		{
-			const float CurrentWallZ = FloorBaseZ + h;
-
-			// Bottom and Top Walls
-			for (int32 x = RoomBox.Min.X; x < RoomBox.Max.X; ++x)
-			{
-				if (!HallwayTiles.Contains(FIntVector(x, RoomBox.Min.Y - 1, z)))
-				{
-					SpawnMesh(WallMesh, FVector((x + 0.5f) * GridUnitSize, RoomBox.Min.Y * GridUnitSize, CurrentWallZ) + GeneratorOffset, HorizontalWallRotation,
-					          FVector::OneVector, TEXT("Wall"));
-				}
-
-				if (!HallwayTiles.Contains(FIntVector(x, RoomBox.Max.Y, z)))
-				{
-					SpawnMesh(WallMesh, FVector((x + 0.5f) * GridUnitSize, RoomBox.Max.Y * GridUnitSize, CurrentWallZ) + GeneratorOffset, HorizontalWallRotation,
-					          FVector::OneVector, TEXT("Wall"));
-				}
-			}
-
-			// Left and Right Walls
-			for (int32 y = RoomBox.Min.Y; y < RoomBox.Max.Y; ++y)
-			{
-				if (!HallwayTiles.Contains(FIntVector(RoomBox.Min.X - 1, y, z)))
-				{
-					SpawnMesh(WallMesh, FVector(RoomBox.Min.X * GridUnitSize, (y + 0.5f) * GridUnitSize, CurrentWallZ) + GeneratorOffset, FRotator::ZeroRotator, FVector::OneVector,
-					          TEXT("Wall"));
-				}
-
-				if (!HallwayTiles.Contains(FIntVector(RoomBox.Max.X, y, z)))
-				{
-					SpawnMesh(WallMesh, FVector(RoomBox.Max.X * GridUnitSize, (y + 0.5f) * GridUnitSize, CurrentWallZ) + GeneratorOffset, FRotator::ZeroRotator, FVector::OneVector,
-					          TEXT("Wall"));
-				}
-			}
-		}
-	}
-	// 3. Spawn Corners
-	if (CornerMesh)
-	{
-		// This simplified logic spawns corners at the base of each vertical column of the room.
-		const FIntVector MinGrid(RoomBox.Min);
-		const FIntVector MaxGrid(RoomBox.Max);
-
-		FVector CornerLocations[] = {
-			FVector(MinGrid.X * GridUnitSize, MinGrid.Y * GridUnitSize, 0),
-			FVector(MaxGrid.X * GridUnitSize, MinGrid.Y * GridUnitSize, 0),
-			FVector(MinGrid.X * GridUnitSize, MaxGrid.Y * GridUnitSize, 0),
-			FVector(MaxGrid.X * GridUnitSize, MaxGrid.Y * GridUnitSize, 0)
-		};
-
-		for (const FVector& CornerXY : CornerLocations)
-		{
-			for (int32 z = RoomBox.Min.Z; z < RoomBox.Max.Z; ++z)
-			{
-				SpawnMesh(CornerMesh, CornerXY + FVector(0, 0, z * FloorHeight) + GeneratorOffset, FRotator::ZeroRotator, FVector::OneVector, TEXT("Corner"));
-			}
-		}
-	}
-}
-
-void ADungeonGenerator::SpawnHallwayWalls()
-{
-	UWorld* World = GetWorld();
-	if (!World || !WallMesh) return;
-
-	const FVector GeneratorOffset = GetActorLocation();
-	const FRotator HorizontalWallRotation = FRotator(0.0f, 90.0f, 0.0f);
-	const TSet<FIntVector> AllTiles = RoomTiles.Union(HallwayTiles);
-
-	for (const FIntVector& Tile : HallwayTiles)
-	{
-		FIntVector Neighbors[4] = {
-			FIntVector(Tile.X, Tile.Y + 1, Tile.Z), // North
-			FIntVector(Tile.X, Tile.Y - 1, Tile.Z), // South
-			FIntVector(Tile.X + 1, Tile.Y, Tile.Z), // East
-			FIntVector(Tile.X - 1, Tile.Y, Tile.Z) // West
-		};
-
-		const float WallZ = Tile.Z * FloorHeight;
-
-		auto SpawnWall = [&](const FVector& Location, const FRotator& Rotation)
-		{
-			AStaticMeshActor* Actor = World->SpawnActor<AStaticMeshActor>();
-			if (Actor)
-			{
-				Actor->GetStaticMeshComponent()->SetStaticMesh(WallMesh);
-				Actor->SetActorLocation(Location);
-				Actor->SetActorRotation(Rotation);
-				Actor->SetActorLabel(TEXT("HallwayWall"));
-				SpawnedActors.Add(Actor);
-			}
-		};
-
-		// Check North
-		if (!AllTiles.Contains(Neighbors[0]))
-		{
-			FVector Location = FVector((Tile.X + 0.5f) * GridUnitSize, (Tile.Y + 1) * GridUnitSize, WallZ) + GeneratorOffset;
-			SpawnWall(Location, HorizontalWallRotation);
-		}
-		// Check South
-		if (!AllTiles.Contains(Neighbors[1]))
-		{
-			FVector Location = FVector((Tile.X + 0.5f) * GridUnitSize, Tile.Y * GridUnitSize, WallZ) + GeneratorOffset;
-			SpawnWall(Location, HorizontalWallRotation);
-		}
-		// Check East
-		if (!AllTiles.Contains(Neighbors[2]))
-		{
-			FVector Location = FVector((Tile.X + 1) * GridUnitSize, (Tile.Y + 0.5f) * GridUnitSize, WallZ) + GeneratorOffset;
-			SpawnWall(Location, FRotator::ZeroRotator);
-		}
-		// Check West
-		if (!AllTiles.Contains(Neighbors[3]))
-		{
-			FVector Location = FVector(Tile.X * GridUnitSize, (Tile.Y + 0.5f) * GridUnitSize, WallZ) + GeneratorOffset;
-			SpawnWall(Location, FRotator::ZeroRotator);
-		}
-	}
 }
 
 void ADungeonGenerator::CalculateDelaunayTetrahedralization()
@@ -527,63 +341,67 @@ void ADungeonGenerator::CreateHallways()
 	}
 }
 
+void ADungeonGenerator::ProcessPathTile(const FIntVector& CurrentPathPoint, const FIntVector& PreviousPathPoint, bool bIsFirstTile)
+{
+    const FVector ActorLocation = GetActorLocation();
+    const FVector CellScale(GridUnitSize / 100.f, GridUnitSize / 100.f, GridUnitSize / 100.f);
+
+    // Process the current tile as a hallway
+    if (Grid.InBounds(CurrentPathPoint) && Grid(CurrentPathPoint) == ECellType::None)
+    {
+        Grid(CurrentPathPoint) = ECellType::Hallway;
+        HallwayTiles.Add(CurrentPathPoint);
+
+        const FVector CellLocation = FVector(CurrentPathPoint.X * GridUnitSize, CurrentPathPoint.Y * GridUnitSize, CurrentPathPoint.Z * GridUnitSize) + ActorLocation;
+        const FTransform InstanceTransform(FRotator::ZeroRotator, CellLocation, CellScale);
+        HallwayISM->AddInstance(InstanceTransform);
+    }
+
+    // Process stairs if there's a vertical change from the previous tile
+    if (!bIsFirstTile)
+    {
+        FIntVector Delta = CurrentPathPoint - PreviousPathPoint;
+        if (Delta.Z != 0)
+        {
+            // This stair logic is the same as what was in ProcessPath before
+            const int32 XDir = FMath::Clamp(Delta.X, -1, 1);
+            const int32 YDir = FMath::Clamp(Delta.Y, -1, 1);
+            const FIntVector VerticalOffset(0, 0, Delta.Z);
+            const FIntVector HorizontalOffset(XDir, YDir, 0);
+
+            FIntVector StairTiles[] = {
+               PreviousPathPoint + HorizontalOffset,
+               PreviousPathPoint + HorizontalOffset * 2,
+               PreviousPathPoint + VerticalOffset + HorizontalOffset,
+               PreviousPathPoint + VerticalOffset + HorizontalOffset * 2
+            };
+
+            for (const FIntVector& StairTile : StairTiles)
+            {
+               if (Grid.InBounds(StairTile))
+               {
+                  Grid(StairTile) = ECellType::Stairs;
+                  HallwayTiles.Add(StairTile);
+                  const FVector CellLocation = FVector(StairTile.X * GridUnitSize, StairTile.Y * GridUnitSize, StairTile.Z * GridUnitSize) + ActorLocation;
+                  const FTransform InstanceTransform(FRotator::ZeroRotator, CellLocation, CellScale);
+                  StairsISM->AddInstance(InstanceTransform);
+               }
+            }
+        }
+    }
+}
+
 void ADungeonGenerator::ProcessPath(TArray<FIntVector> Path)
 {
 	if (!Path.IsEmpty())
 	{
 		const FVector ActorLocation = GetActorLocation();
-		const FVector CellScale(GridUnitSize / 100.f, GridUnitSize / 100.f, FloorHeight / 100.f);
+		const FVector CellScale(GridUnitSize / 100.f, GridUnitSize / 100.f, GridUnitSize / 100.f);
 		
 		for (int32 i = 0; i < Path.Num(); i++)
 		{
-			FIntVector CurrentPathPoint = Path[i];
-
-			if (Grid.InBounds(CurrentPathPoint) && Grid(CurrentPathPoint) == ECellType::None)
-			{
-				Grid(CurrentPathPoint) = ECellType::Hallway;
-				HallwayTiles.Add(CurrentPathPoint);
-
-				const FVector CellLocation = FVector(CurrentPathPoint.X * GridUnitSize, CurrentPathPoint.Y * GridUnitSize, CurrentPathPoint.Z * FloorHeight) + ActorLocation;
-				const FTransform InstanceTransform(FRotator::ZeroRotator, CellLocation, CellScale);
-				HallwayISM->AddInstance(InstanceTransform);
-			}
-
-			if (i > 0)
-			{
-				FIntVector PreviousPathPoint = Path[i - 1];
-
-				FIntVector Delta = CurrentPathPoint - PreviousPathPoint;
-
-				if (Delta.Z != 0)
-				{
-					const int32 XDir = FMath::Clamp(Delta.X, -1, 1);
-					const int32 YDir = FMath::Clamp(Delta.Y, -1, 1);
-					const FIntVector VerticalOffset(0, 0, Delta.Z);
-					const FIntVector HorizontalOffset(XDir, YDir, 0);
-
-					// Define the 4 tiles that make up the 2x1 stairwell on both levels
-					FIntVector StairTiles[] = {
-						PreviousPathPoint + HorizontalOffset,
-						PreviousPathPoint + HorizontalOffset * 2,
-						PreviousPathPoint + VerticalOffset + HorizontalOffset,
-						PreviousPathPoint + VerticalOffset + HorizontalOffset * 2
-					};
-
-					// Mark tiles as stairs, add to set, and spawn meshes
-					for (const FIntVector& StairTile : StairTiles)
-					{
-						if (Grid.InBounds(StairTile))
-						{
-							Grid(StairTile) = ECellType::Stairs;
-							HallwayTiles.Add(StairTile);
-							const FVector CellLocation = FVector(StairTile.X * GridUnitSize, StairTile.Y * GridUnitSize, StairTile.Z * FloorHeight) + ActorLocation;
-							const FTransform InstanceTransform(FRotator::ZeroRotator, CellLocation, CellScale);
-							StairsISM->AddInstance(InstanceTransform);
-							// SpawnStairs(StairTile);
-						}
-					}
-				}
-			}
+			FIntVector PreviousPoint = (i>0) ? Path[i-1] : Path[i];
+			ProcessPathTile(Path[i], PreviousPoint, i==0);
 		}
 	}
 }
@@ -592,8 +410,12 @@ void ADungeonGenerator::PathfindHallways()
 {
 	if (DungeonRooms.Num() < 2) return;
 	if (HallwayEdges.IsEmpty()) return;
-
-	FIntVector GridSize3D = FIntVector(GridSize.X, GridSize.Y, NumberOfFloors);
+	
+	FinalPathsToDraw_Async.Empty();
+	HallwayISM->ClearInstances();
+	StairsISM->ClearInstances();
+	
+	FIntVector GridSize3D = FIntVector(GridSize.X, GridSize.Y, GridSize.Z);
 	Pathfinder.Initialize(GridSize3D, this, [&](const FIntVector& Pos) -> FVector
 	{
 		return this->GridToWorld(Pos);
@@ -601,23 +423,49 @@ void ADungeonGenerator::PathfindHallways()
 	
 	DebugDrawGrid();
 	
-	if (bVisualizePathfinding)
+	switch (PathfindDebugMode)
 	{
-		StartHallwayPathfinding_Async();
-	}
-	else
-	{
-		for (int32 i = 0; i < HallwayEdges.Num(); ++i)
-		{
-			PathfindHallwayEdge(i);
-		}
-		UE_LOG(LogDungeonMaker, Log, TEXT("Finished pathfinding all hallways instantly."));
+		case EPathfindDebugMode::StepByStep:
+			{
+				// Use the slow, async method that visualizes the A* algorithm at work
+				StartHallwayPathfinding_Async();
+				break;
+			}
+
+		case EPathfindDebugMode::AnimateFinalPath:
+			{
+				for (int32 i = 0; i < HallwayEdges.Num(); ++i)
+				{
+					TArray<FIntVector> Path = PathfindHallwayEdge(i);
+					if (!Path.IsEmpty())
+					{
+						FinalPathsToDraw_Async.Enqueue(Path);
+					}
+				}
+				UE_LOG(LogDungeonMaker, Log, TEXT("Finished pathfinding all hallways instantly."));
+
+				StartDrawingFinalPaths_Async();
+				break;
+			}
+
+		case EPathfindDebugMode::None:
+			default:
+			{
+				// Calculate and draw everything instantly with no visualization
+				for (int32 i = 0; i < HallwayEdges.Num(); ++i)
+				{
+					TArray<FIntVector> Path = PathfindHallwayEdge(i);
+					ProcessPath(Path); // Process and draw immediately
+				}
+				UE_LOG(LogDungeonMaker, Log, TEXT("Finished pathfinding all hallways instantly."));
+				break;
+			}
 	}
 };
 
-void ADungeonGenerator::PathfindHallwayEdge(int32 EdgeIndex)
+TArray<FIntVector> ADungeonGenerator::PathfindHallwayEdge(int32 EdgeIndex)
 {
-	if (!HallwayEdges.IsValidIndex(EdgeIndex)) return;
+	if (!HallwayEdges.IsValidIndex(EdgeIndex)) return TArray<FIntVector>();
 
 	const TTuple<int32, int32>& Edge = HallwayEdges[EdgeIndex];
 	const FDungeonRoom& RoomEdge1 = DungeonRooms[Edge.Get<0>()];
@@ -629,7 +477,7 @@ void ADungeonGenerator::PathfindHallwayEdge(int32 EdgeIndex)
 	                                              	return this->CalculateHallwayPathCost(Current, Neighbor, RoomEdge2);
 	                                              });
 
-	ProcessPath(Path);
+	return Path;
 }
 
 void ADungeonGenerator::StartHallwayPathfinding_Async()
@@ -697,6 +545,78 @@ void ADungeonGenerator::PathfindNextHallway_Async()
 	}
 }
 
+void ADungeonGenerator::UpdateCurrentPathVisual()
+{
+	DebugCurrentPathISM->ClearInstances();
+
+	const FPathNode* CurrentNode = Pathfinder.GetCurrentNode();
+
+	while (CurrentNode != nullptr)
+	{
+		AddDebugInstance(DebugCurrentPathISM, CurrentNode->Position);
+		CurrentNode = CurrentNode->Previous;
+	}
+}
+
+void ADungeonGenerator::AddDebugInstance(UInstancedStaticMeshComponent* ISM, const FIntVector& GridPos)
+{
+	if (!ISM) return;
+	const FVector ActorLocation = GetActorLocation();
+	const FVector CellScale(GridUnitSize / 100.f, GridUnitSize / 100.f, GridUnitSize / 100.f);
+	const FVector CellLocation = FVector(GridPos.X * GridUnitSize, GridPos.Y * GridUnitSize, GridPos.Z * GridUnitSize) + ActorLocation;
+	ISM->AddInstance(FTransform(FRotator::ZeroRotator, CellLocation, CellScale));
+}
+
+void ADungeonGenerator::StartDrawingFinalPaths_Async()
+{
+	CurrentPathDrawIndex = 0;
+	if (!FinalPathsToDraw_Async.IsEmpty())
+	{
+		// Kick off the timer to draw the first segment
+		GetWorld()->GetTimerManager().SetTimer(
+			FinalPathDrawTimer,
+			this,
+			&ADungeonGenerator::DrawNextPathSegment_Async,
+			0.05f, // You can adjust this speed
+			false
+		);
+	}
+}
+
+void ADungeonGenerator::DrawNextPathSegment_Async()
+{
+	TArray<FIntVector> CurrentPath;
+	if (!FinalPathsToDraw_Async.Peek(CurrentPath))
+	{
+		// No paths left in the queue, we're done.
+		UE_LOG(LogDungeonMaker, Log, TEXT("Finished drawing all paths."));
+		GetWorld()->GetTimerManager().ClearTimer(FinalPathDrawTimer);
+		return;
+	}
+
+	if (CurrentPath.IsValidIndex(CurrentPathDrawIndex))
+	{
+		// Get the current and previous points to process
+		const FIntVector CurrentPoint = (CurrentPath)[CurrentPathDrawIndex];
+		const FIntVector PreviousPoint = (CurrentPathDrawIndex > 0) ? (CurrentPath)[CurrentPathDrawIndex - 1] : CurrentPoint;
+        
+		// Draw the tile
+		ProcessPathTile(CurrentPoint, PreviousPoint, CurrentPathDrawIndex == 0);
+
+		// Move to the next index and set the timer again
+		CurrentPathDrawIndex++;
+		GetWorld()->GetTimerManager().SetTimer(FinalPathDrawTimer, this, &ADungeonGenerator::DrawNextPathSegment_Async, 0.05f, false);
+	}
+	else
+	{
+		// We've finished drawing the current path, so dequeue it and start the next one.
+		FinalPathsToDraw_Async.Dequeue(CurrentPath);
+		CurrentPathDrawIndex = 0;
+
+		// Immediately try to draw the next path (or finish if the queue is empty)
+		DrawNextPathSegment_Async();
+	}
+}
 
 void ADungeonGenerator::DrawDelaunayTetrahedralization()
 {
@@ -747,9 +667,9 @@ void ADungeonGenerator::DebugDrawGrid()
 	StairsISM->ClearInstances();
 
 	const FVector ActorLocation = GetActorLocation();
-	const FVector CellScale(GridUnitSize / 100.f, GridUnitSize / 100.f, FloorHeight / 100.f);
+	const FVector CellScale(GridUnitSize / 100.f, GridUnitSize / 100.f, GridUnitSize / 100.f);
 
-	for (int32 z = 0; z < NumberOfFloors; ++z)
+	for (int32 z = 0; z < GridSize.Z; ++z)
 	{
 		for (int32 y = 0; y < GridSize.Y; ++y)
 		{
@@ -767,7 +687,7 @@ void ADungeonGenerator::DebugDrawGrid()
 
 				if (TargetISM)
 				{
-					const FVector CellLocation = FVector(x * GridUnitSize, y * GridUnitSize, z * FloorHeight) + ActorLocation;
+					const FVector CellLocation = FVector(x * GridUnitSize, y * GridUnitSize, z * GridUnitSize) + ActorLocation;
 					const FTransform InstanceTransform(FRotator::ZeroRotator, CellLocation, CellScale);
 					TargetISM->AddInstance(InstanceTransform);
 				}

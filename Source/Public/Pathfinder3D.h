@@ -98,6 +98,8 @@ public:
 	TArray<FIntVector> GetFinalPath();
 	
 	TArray<FIntVector> FindPath(FIntVector Start, FIntVector End, TFunction<FPathCost(FPathNode*, FPathNode*)> CostFunction);
+
+	FPathNode* GetCurrentNode() const { return CurrentNode; };
 	
 private:
 	FGrid3D<FPathNode> Grid;
@@ -111,30 +113,26 @@ private:
 	// This function converts a grid to world location based on the user rules (the grid of the generator)
 	TFunction<FVector(const FIntVector&)> GridToWorldFunc;
 	
-	static const FIntVector StairPaddedNeighbours[12];
+	static const FIntVector Neighbours[12];
 
 	TArray<FPathNode*> VisitedNodes;
 
 	// STATE VARIABLES (for advancing in steps if needed for debug)
 	FPathNode* GoalNode = nullptr;
+	FPathNode* CurrentNode = nullptr; // node currently processed
 	TFunction<FPathCost(FPathNode*, FPathNode*)> CurrentCostFunction;
 };
 
-// These are offsets used to skip stairs cells
-// 2x2 + 1 unit of padding for landings that is supposed to be traversable
-const FIntVector Pathfinder3D::StairPaddedNeighbours[12] =
+const FIntVector Pathfinder3D::Neighbours[12] =
 {
-	// --- 1. FLAT MOVES (Z is 0) ---
+	// FLAT MOVES (Z is 0)
 	// These are always single-tile steps to ensure contiguous hallways.
 	{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0},
 
-	// --- 2. STAIR MOVES (Z is not 0) ---
+	// STAIR MOVES (Z is not 0)
 	// These are large jumps that represent a full stair segment.
-	// This maps the C# (X,Y_vert,Z_depth) to Unreal's (X,Y_depth,Z_vert)
-	// Z+1 (Going Up)
 	{3, 0, 1}, {-3, 0, 1}, {0, 3, 1}, {0, -3, 1},
 	
-	// Z-1 (Going Down)
+	// Z-1
 	{3, 0, -1}, {-3, 0, -1}, {0, 3, -1}, {0, -3, -1}
-
 };

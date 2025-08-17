@@ -8,10 +8,16 @@
 #include "Tetrahedralizer.h"
 #include "DungeonGenerator.generated.h"
 
-// TODO: setting floorheight to gridunitsize makes flat dungeons (having it double or more makes the pathfinding cubes be too high (2/1 height/base)
+// TODO: discard corridors between rooms too far (? how to ensure connectivity though? maybe just try to place rooms closer to each-other)
 
 
-class AStaticMeshActor;
+UENUM(BlueprintType)
+enum class EPathfindDebugMode : uint8
+{
+	None UMETA(DisplayName="None"),
+	StepByStep UMETA(DisplayName="Step-by-Step (A*)"),
+	AnimateFinalPath UMETA(DisplayName="Animate Final Path (Cinematic)")
+};
 
 UENUM()
 enum ECellType
@@ -99,7 +105,7 @@ FORCEINLINE uint32 GetTypeHash(const TTuple<int32, int32>& Tuple)
 	return HashCombine(GetTypeHash(FMath::Min(Tuple.Get<0>(), Tuple.Get<1>())), GetTypeHash(FMath::Max(Tuple.Get<0>(), Tuple.Get<1>())));
 }
 
-UCLASS()
+UCLASS(PrioritizeCategories = ("Dungeon Generation"))
 class DUNGEONMAKER_API ADungeonGenerator : public AActor
 {
 	GENERATED_BODY()
@@ -107,121 +113,110 @@ class DUNGEONMAKER_API ADungeonGenerator : public AActor
 public:
 	ADungeonGenerator();
 
-public:
 	UFUNCTION(CallInEditor, Category = "Dungeon Generation")
 	void GenerateDungeon();
-	
-	UFUNCTION(CallInEditor, Category = "Dungeon Generation|Debug")
-	void DrawDelaunayTetrahedralization();
-	
-	UFUNCTION(CallInEditor, Category = "Dungeon Generation|Debug")
-	void DrawMstGraph();
-	
-	UFUNCTION(CallInEditor, Category = "Dungeon Generation|Debug")
-	void DrawHallways();
 
+	UFUNCTION(CallInEditor, Category = "Dungeon Generation")
+	void ClearDungeon();
+	
 	UFUNCTION(CallInEditor, Category = "Dungeon Generation")
 	void PathfindHallways();
 
-	UFUNCTION(CallInEditor, Category = "Dungeon Generation|Debug")
-	void DebugDrawGrid();
+	UFUNCTION(CallInEditor, Category = "Dungeon Generation | Debug")
+	void DrawDelaunayTetrahedralization();
 	
-	UFUNCTION(CallInEditor, Category = "Dungeon Generation")
-	void ClearDungeon();
+	UFUNCTION(CallInEditor, Category = "Dungeon Generation | Debug")
+	void DrawMstGraph();
+	
+	UFUNCTION(CallInEditor, Category = "Dungeon Generation | Debug")
+	void DrawHallways();
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-	bool bVisualizePathfinding = true; 
+	UFUNCTION(CallInEditor, Category = "Dungeon Generation | Debug")
+	void DebugDrawGrid();
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dungeon Generation | Debug")
+	EPathfindDebugMode PathfindDebugMode;
 
 	FVector GridToWorld(const FIntVector& GridPos) const
 	{
 		const FVector WorldPos(
 			GridPos.X * GridUnitSize,
 			GridPos.Y * GridUnitSize,
-			GridPos.Z * FloorHeight
+			GridPos.Z * GridUnitSize
 		);
 		return WorldPos + GetActorLocation();
 	}
+	
+public:
+	UPROPERTY(EditAnywhere, Category = "Dungeon Settings | Grid", meta = (ClampMin = "10"))
+	FIntVector GridSize = FIntVector(20, 20, 3);
+	
+	UPROPERTY(EditAnywhere, Category = "Dungeon Settings | Grid", meta = (ClampMin = "1"))
+	float GridUnitSize = 400.0f;
+	
+	UPROPERTY(EditAnywhere, Category = "Dungeon Settings | Rooms", meta = (ClampMin = "1"))
+	int32 NumberOfRooms = 5;
+	
+	UPROPERTY(EditAnywhere, Category = "Dungeon Settings | Rooms")
+	FIntPoint RoomSizeMinMax = FIntPoint(4, 10);
+
+	UPROPERTY(EditAnywhere, Category = "Dungeon Settings | Rooms", meta = (ClampMin = "1"))
+	FIntPoint RoomHeightInFloorsMinMax = FIntPoint(1, 2);
+	
+	UPROPERTY(EditAnywhere, Category = "Dungeon Settings | Rooms", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float ExtraConnectionChance = 0.2f;
+	
+	UPROPERTY(EditAnywhere, Category = "Dungeon Settings | Debug")
+	FColor DelaunayDebugColor = FColor::Magenta;
+	
+	UPROPERTY(EditAnywhere, Category = "Dungeon Settings | Debug")
+	FColor MstDebugColor = FColor::Green;
+	
+	UPROPERTY(Editanywhere, Category = "Dungeon Settings | Debug")
+	FColor HallwayDebugColor = FColor::White;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dungeon Generation | Debug")
+	TObjectPtr<UInstancedStaticMeshComponent> DebugCurrentPathISM;
 
 protected:
 	Pathfinder3D Pathfinder;
 
-	UPROPERTY(VisibleAnywhere)
+	UPROPERTY()
 	UInstancedStaticMeshComponent* RoomISM;
 
-	UPROPERTY(VisibleAnywhere)
+	UPROPERTY()
 	UInstancedStaticMeshComponent* HallwayISM;
 
-	UPROPERTY(VisibleAnywhere)
+	UPROPERTY()
 	UInstancedStaticMeshComponent* StairsISM;
 	
-	
-protected:
-	// Iterate the grid 
-	void PlaceRooms();
 private:
 	FPathCost CalculateHallwayPathCost(const FPathNode* Current, const FPathNode* Neighbor, const FDungeonRoom& GoalRoom);
+
+	void PlaceRooms();
 	
 	void CalculateDelaunayTetrahedralization(); 
 	void CalculateMst();
 	void CreateHallways();
+	void ProcessPathTile(const FIntVector& CurrentPathPoint, const FIntVector& PreviousPathPoint, bool bIsFirstTile);
 
 	void ProcessPath(TArray<FIntVector> Path);
-	void PathfindHallwayEdge(int32 Edge);
+	TArray<FIntVector> PathfindHallwayEdge(int32 Edge);
 
 	void StartHallwayPathfinding_Async();
 	void PathfindNextHallway_Async();
 
-	void SpawnHallwayWalls();
-	void SpawnRoomActors(UWorld* World, const FDungeonRoomBox& RoomBox, int32 RoomIndex);
-
-	//~ UProperties
-	//=================================================================================================
-	UPROPERTY(EditAnywhere, Category = "Dungeon Settings|Grid", meta = (ClampMin = "10"))
-	FIntPoint GridSize = FIntPoint(20, 20);
-	UPROPERTY(EditAnywhere, Category = "Dungeon Settings|Grid", meta = (ClampMin = "1"))
-	float GridUnitSize = 400.0f;
-	// New 3D Properties
-	UPROPERTY(EditAnywhere, Category = "Dungeon Settings|Grid", meta = (ClampMin = "1"))
-	int32 NumberOfFloors = 3;
-	UPROPERTY(EditAnywhere, Category = "Dungeon Settings|Grid", meta = (ClampMin = "100.0"))
-	float FloorHeight = 800.0f;
+	void UpdateCurrentPathVisual();
+	void AddDebugInstance(UInstancedStaticMeshComponent* ISM, const FIntVector& GridPos);
 	
-	UPROPERTY(EditAnywhere, Category = "Dungeon Settings|Rooms", meta = (ClampMin = "1"))
-	int32 NumberOfRooms = 25;
-	UPROPERTY(EditAnywhere, Category = "Dungeon Settings|Rooms")
-	FIntPoint RoomSizeMinMax = FIntPoint(4, 10);
-	// New 3D Property
-	UPROPERTY(EditAnywhere, Category = "Dungeon Settings|Rooms", meta = (ClampMin = "1"))
-	FIntPoint RoomHeightInFloorsMinMax = FIntPoint(1, 2);
-	
-	UPROPERTY(EditAnywhere, Category = "Dungeon Settings|Rooms", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float ExtraConnectionChance = 0.2f;
+	void StartDrawingFinalPaths_Async();
+	void DrawNextPathSegment_Async();
 
-	UPROPERTY(EditAnywhere, Category = "Dungeon Settings|Visuals")
-	TObjectPtr<UStaticMesh> RoomFloorMesh;
-	UPROPERTY(EditAnywhere, Category = "Dungeon Settings|Visuals")
-	TObjectPtr<UStaticMesh> WallMesh;
-	UPROPERTY(EditAnywhere, Category = "Dungeon Settings|Visuals")
-	TObjectPtr<UStaticMesh> CornerMesh;
-	UPROPERTY(EditAnywhere, Category = "Dungeon Settings|Visuals")
-	TObjectPtr<UStaticMesh> HallwayFloorMesh;
-	UPROPERTY(EditAnywhere, Category = "Dungeon Settings|Debug")
-	FColor DelaunayDebugColor = FColor::Magenta;
-	UPROPERTY(EditAnywhere, Category = "Dungeon Settings|Debug")
-	FColor MstDebugColor = FColor::Green;
-	UPROPERTY(Editanywhere, Category = "Dungeon Settings|Debug")
-	FColor HallwayDebugColor = FColor::White;
-
-private:	
-	FGrid3D<ECellType> Grid;
-	
-	//~ Graph Data
-	//=================================================================================================
-
-	TArray<TObjectPtr<AStaticMeshActor>> SpawnedActors;
-
+private:
 	UPROPERTY()
 	TArray<FDungeonRoom> DungeonRooms;
+	
+	FGrid3D<ECellType> Grid;
 
 	TArray<TTuple<int32, int32>> DelaunayEdges;
 
@@ -229,18 +224,11 @@ private:
 
 	TArray<TTuple<int32, int32>> HallwayEdges;
 
-
-	TSet<FWallPosition> DoorwayPositions;
-
-	// Changed to FIntVector for 3D coordinates
-	TSet<FIntVector> RemovedCornerPositions;
-
-	// Changed to FIntVector for 3D coordinates
 	TSet<FIntVector> HallwayTiles;
 
-	// Changed to FIntVector for 3D coordinates
 	TSet<FIntVector> RoomTiles;
 
+	
 	// DEBUG TOOLS
 	
 	// Tracks which hallway we are currently processing - used only for debugging
@@ -249,4 +237,10 @@ private:
 	// For debug, you can run generation on a timer so you can see each step of the algo at work
 	FTimerHandle HallwayPathfindTimer;
 	bool bIsPathfinderRunning;
+
+	TQueue<TArray<FIntVector>> FinalPathsToDraw_Async;
+
+	int32 CurrentPathDrawIndex;
+
+	FTimerHandle FinalPathDrawTimer;
 };
