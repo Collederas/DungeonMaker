@@ -123,6 +123,9 @@ public:
 	void PathfindHallways();
 
 	UFUNCTION(CallInEditor, Category = "Dungeon Generation | Debug")
+	void StopPathfindingAsync();
+
+	UFUNCTION(CallInEditor, Category = "Dungeon Generation | Debug")
 	void DrawDelaunayTetrahedralization();
 	
 	UFUNCTION(CallInEditor, Category = "Dungeon Generation | Debug")
@@ -175,9 +178,6 @@ public:
 	UPROPERTY(Editanywhere, Category = "Dungeon Settings | Debug")
 	FColor HallwayDebugColor = FColor::White;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dungeon Generation | Debug")
-	TObjectPtr<UInstancedStaticMeshComponent> DebugCurrentPathISM;
-
 protected:
 	Pathfinder3D Pathfinder;
 
@@ -190,6 +190,9 @@ protected:
 	UPROPERTY()
 	UInstancedStaticMeshComponent* StairsISM;
 	
+	UPROPERTY()
+	TObjectPtr<UInstancedStaticMeshComponent> DebugCurrentPathISM;
+	
 private:
 	FPathCost CalculateHallwayPathCost(const FPathNode* Current, const FPathNode* Neighbor, const FDungeonRoom& GoalRoom);
 
@@ -198,6 +201,8 @@ private:
 	void CalculateDelaunayTetrahedralization(); 
 	void CalculateMst();
 	void CreateHallways();
+
+	// This instances the static meshes that represent each tile (hallway, stairs).
 	void ProcessPathTile(const FIntVector& CurrentPathPoint, const FIntVector& PreviousPathPoint, bool bIsFirstTile);
 
 	void ProcessPath(TArray<FIntVector> Path);
@@ -243,4 +248,5 @@ private:
 	int32 CurrentPathDrawIndex;
 
 	FTimerHandle FinalPathDrawTimer;
+	bool bIsAsyncProcessActive = false;
 };

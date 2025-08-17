@@ -2,6 +2,19 @@
 
 #include "DungeonMaker.h"
 
+const FIntVector Pathfinder3D::Neighbours[12] =
+{
+	// FLAT MOVES (Z is 0)
+	// These are always single-tile steps to ensure contiguous hallways.
+	{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0},
+
+	// STAIR MOVES (Z is not 0)
+	// These are large jumps that represent a full stair segment.
+	{3, 0, 1}, {-3, 0, 1}, {0, 3, 1}, {0, -3, 1},
+	
+	// Z-1
+	{3, 0, -1}, {-3, 0, -1}, {0, 3, -1}, {0, -3, -1}
+};
 
 Pathfinder3D::Pathfinder3D()
 	: OpenQueue(([](FPathNode* A, FPathNode* B) { return A->Cost < B->Cost; }))
