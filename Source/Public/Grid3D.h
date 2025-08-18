@@ -64,6 +64,11 @@ public:
 		return (Size.X * Size.Y * Size.Z);
 	}
 
+	FIntVector GetGridSizeVector()
+	{
+		return Size;
+	}
+
 	// Access using 3 separate ints
 	T& operator()(int X, int Y, int Z)
 	{

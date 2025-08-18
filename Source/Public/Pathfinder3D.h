@@ -2,17 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "Grid3D.h"
-#include "SimpleQueue.h"
+#include "MinHeap.h"
 
-
-struct FPathfinderDebugDrawer
-{
-	bool bVisualize = false;
-	TFunction<void(FIntVector Pos)> DrawCurrentNode;
-	TFunction<void(FIntVector Pos)> DrawNeighborNode;
-	TFunction<void(FIntVector Pos)> DrawClosedNode;
-	TFunction<void(FIntVector Pos)> DrawPathNode;
-};
 
 /** Represents a single node in the A* search space. Stores all nodes that the path has
  * visited and the cost of the whole path up to the node.
@@ -112,7 +103,8 @@ private:
 	// The pathfinder works with its own FGrid3D that is initialized to be = to the main grid of the generator just with coordinates instead of celltypes
 	// This function converts a grid to world location based on the user rules (the grid of the generator)
 	TFunction<FVector(const FIntVector&)> GridToWorldFunc;
-	
+	TFunction<FPathCost(FPathNode*, FPathNode*)> CurrentCostFunction;
+
 	static const FIntVector Neighbours[12];
 
 	TArray<FPathNode*> VisitedNodes;
@@ -120,5 +112,4 @@ private:
 	// STATE VARIABLES (for advancing in steps if needed for debug)
 	FPathNode* GoalNode = nullptr;
 	FPathNode* CurrentNode = nullptr; // node currently processed
-	TFunction<FPathCost(FPathNode*, FPathNode*)> CurrentCostFunction;
 };

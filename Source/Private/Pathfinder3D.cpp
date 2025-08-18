@@ -1,6 +1,7 @@
 ﻿#include "Pathfinder3D.h"
 
 #include "DungeonMaker.h"
+#include "VisualLogger/VisualLogger.h"
 
 const FIntVector Pathfinder3D::Neighbours[12] =
 {
