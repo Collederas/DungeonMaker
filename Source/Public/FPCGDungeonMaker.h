@@ -46,21 +46,10 @@ public:
 class FDungeonPCGElement : public IPCGElement
 {
 protected:
-	static FVector GridToWorld(const FIntVector& GridPos, float GridUnitSize);
-	static FPathCost CalculateHallwayPathCost(const FPathNode* Current, const FPathNode* Neighbor, const FDungeonRoom& GoalRoom, FGrid3D<ECellType>& Grid);
-	
-	static void PlaceRooms(FGrid3D<ECellType>& Grid, TArray<FDungeonRoom>& DungeonRooms, const UDungeonPCGSettings* Settings, FRandomStream& InRandomStream);
-	static void CalculateDelaunayTetrahedralization(TArray<TTuple<int32, int32>>& DelaunayEdges, const TArray<FDungeonRoom>& DungeonRooms);
-	static void CalculateMst(TArray<TTuple<int32, int32>>& MstEdges, const TArray<FDungeonRoom>& DungeonRooms, const TArray<TTuple<int32, int32>>& DelaunayEdges);
-	static void CreateHallwayEdges(TArray<TTuple<int32, int32>>& HallwayEdges, const TArray<FDungeonRoom>& DungeonRooms, const TArray<TTuple<int32, int32>>& MstEdges,
-		const TArray<TTuple<int32, int32>>& DelaunayEdges, const UDungeonPCGSettings* Settings, FRandomStream& InRandomStream);
-
-	static void PathfindHallways(FGrid3D<ECellType>& Grid, const TArray<FDungeonRoom>& DungeonRooms, const TArray<TTuple<int32, int32>>& HallwayEdges, const UDungeonPCGSettings* Settings);
-	static void ProcessPath(FGrid3D<ECellType>& Grid, const TArray<FIntVector>& Path);
-	static void ProcessPathTile(FGrid3D<ECellType>& Grid, const FIntVector& CurrentPathPoint, const FIntVector& PreviousPathPoint, bool bIsFirstTile);
+	static bool IsCellConnected(const FGrid3D<ECellType>& Grid, FIntVector CellCoord);
+	static ECellType GetCell(const FGrid3D<ECellType>& Grid, int32 x, int32 y, int32 z);
 
 	static void GeneratePCGAttributes(FGrid3D<ECellType>& Grid, FPCGContext* Context, const UDungeonPCGSettings* Settings);
-	static ECellType GetCell(const FGrid3D<ECellType>& Grid, int32 x, int32 y, int32 z);
 
 	virtual EPCGElementExecutionLoopMode ExecutionLoopMode(const UPCGSettings* Settings) const override { return EPCGElementExecutionLoopMode::SinglePrimaryPin; }
 	virtual bool ExecuteInternal(FPCGContext* Context) const override;
