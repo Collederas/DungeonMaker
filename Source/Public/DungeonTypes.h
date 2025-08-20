@@ -7,13 +7,38 @@
 
 
 UENUM()
-enum ECellType
+enum class ECellType
 {
 	None,
 	Room,
 	Hallway,
 	Stairs
 };
+
+UENUM()
+enum class EStairPart : uint8
+{
+	None,        // Not part of a staircase
+	LowerMesh,   // The cell where the lower stair mesh should be spawned
+	UpperMesh,   // The cell where the upper stair mesh should be spawned
+	EmptySpace   // Part of the stair volume, but no mesh is spawned here
+};
+
+USTRUCT(BlueprintType)
+struct FCellData
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	ECellType Type = ECellType::None;
+
+	UPROPERTY()
+	FRotator Rotation = FRotator::ZeroRotator;
+
+	UPROPERTY()
+	EStairPart StairPart = EStairPart::None;
+};
+
 
 USTRUCT(BlueprintType)
 struct FDungeonRoomBox

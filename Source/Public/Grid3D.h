@@ -64,7 +64,7 @@ public:
 		return (Size.X * Size.Y * Size.Z);
 	}
 
-	FIntVector GetGridSizeVector()
+	FIntVector GetGridSizeVector() const
 	{
 		return Size;
 	}

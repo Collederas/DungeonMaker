@@ -22,11 +22,11 @@ public:
 
 	void Init(AActor* InOwner, FIntVector InGridSize, float InGridUnitSize, float InNumOfRooms, FIntPoint InRoomSizeMinMax, FIntPoint InRoomHeightMinMax, float InExtraConnectionChance);
 	
-	FGrid3D<ECellType> GenerateDungeon();
+	FGrid3D<FCellData> GenerateDungeon();
 
 	void ClearDungeon();
 	
-	FGrid3D<ECellType> GetGrid() { return Grid; };
+	FGrid3D<FCellData> GetGrid() { return Grid; };
 	
 public:
 	UPROPERTY(EditAnywhere, Category = "Dungeon Settings | Grid", meta = (ClampMin = "10"))
@@ -91,7 +91,7 @@ private:
 	UPROPERTY()
 	TArray<FDungeonRoom> DungeonRooms;
 	
-	FGrid3D<ECellType> Grid;
+	FGrid3D<FCellData> Grid;
 
 	TArray<TTuple<int32, int32>> DelaunayEdges;
 

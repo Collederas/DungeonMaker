@@ -27,126 +27,141 @@ bool FDungeonPCGElement::IsCellConnected(const FGrid3D<ECellType>& Grid, FIntVec
 	return Grid(CellCoord) != ECellType::None;
 }
 
-
-void FDungeonPCGElement::GeneratePCGAttributes(FGrid3D<ECellType>& Grid, FPCGContext* Context, const UDungeonPCGSettings* Settings)
+ECellType FDungeonPCGElement::GetCellTypeAt(const FGrid3D<FCellData>& Grid, int32 x, int32 y, int32 z)
 {
-	UPCGPointData* PointData = NewObject<UPCGPointData>();
-	TArray<FPCGPoint>& Points = PointData->GetMutablePoints();
-	UPCGMetadata* Metadata = PointData->MutableMetadata();
-	if (!Metadata)
+	if (Grid.InBounds(FIntVector(x, y, z)))
 	{
-		return;
+		return Grid(x, y, z).Type;
 	}
-	auto* MeshTypeAttr = Metadata->FindOrCreateAttribute<FString>(TEXT("MeshType"), FString());
-	auto* YawAttr = Metadata->FindOrCreateAttribute<float>(TEXT("Orientation_Yaw"), 0.0f);
+	return ECellType::None;
+}
 
-	const FTransform& TargetActorTransform = Context->GetTargetActor(nullptr)->GetActorTransform();
-	const FIntVector GridSize = Grid.GetGridSizeVector();
+void FDungeonPCGElement::GeneratePCGAttributes(const FGrid3D<FCellData>& Grid, FPCGContext* Context, const UDungeonPCGSettings* Settings)
+{
+    UPCGPointData* PointData = NewObject<UPCGPointData>();
+    TArray<FPCGPoint>& Points = PointData->GetMutablePoints();
+    UPCGMetadata* Metadata = PointData->MutableMetadata();
+    if (!Metadata) return;
 
-	for (int32 z = 0; z < GridSize.Z; ++z)
-	{
-		for (int32 y = 0; y < GridSize.Y; ++y)
-		{
-			for (int32 x = 0; x < GridSize.X; ++x)
-			{
-				const FIntVector CurrentCell(x, y, z);
-				const ECellType CellType = GetCell(Grid, x, y, z);
+    auto* MeshTypeAttr = Metadata->FindOrCreateAttribute<FString>(TEXT("MeshType"), FString());
 
-				if (CellType == ECellType::None)
-				{
-					continue;
-				}
-				const FVector LocalPosition = FVector(CurrentCell) * Settings->GridUnitSize;
-				const FTransform PointBaseTransform(LocalPosition);
+    const FTransform& TargetActorTransform = Context->GetTargetActor(nullptr)->GetActorTransform();
+    const FIntVector GridSize = Grid.GetGridSizeVector();
 
-				bool bIsStairRamp = (CellType == ECellType::Stairs && GetCell(Grid, x, y, z + 1) == ECellType::Stairs);
+    for (int32 z = 0; z < GridSize.Z; ++z)
+    {
+        for (int32 y = 0; y < GridSize.Y; ++y)
+        {
+            for (int32 x = 0; x < GridSize.X; ++x)
+            {
+                const FIntVector CurrentCell(x, y, z);
+                const FCellData& Cell = Grid(CurrentCell);
+                const ECellType CellType = Cell.Type;
 
-				if (GetCell(Grid, x, y, z - 1) == ECellType::None)
-				{
-					FPCGPoint& FloorPoint = Points.Emplace_GetRef();
-					FloorPoint.Transform = PointBaseTransform * TargetActorTransform;
-					FloorPoint.MetadataEntry = Metadata->AddEntry();
-					MeshTypeAttr->SetValue(FloorPoint.MetadataEntry, TEXT("Floor"));
-				}
+                if (CellType == ECellType::None)
+                {
+                    continue;
+                }
 
-				if (GetCell(Grid, x, y, z + 1) == ECellType::None && !bIsStairRamp)
-				{
-					const FVector CeilingLocalPosition = LocalPosition + FVector(0, 0, Settings->GridUnitSize);
-					FPCGPoint& CeilPoint = Points.Emplace_GetRef();
-					CeilPoint.Transform = FTransform(CeilingLocalPosition) * TargetActorTransform;
-					CeilPoint.MetadataEntry = Metadata->AddEntry();
-					MeshTypeAttr->SetValue(CeilPoint.MetadataEntry, TEXT("Ceiling"));
-				}
+                const FVector LocalPosition = FVector(CurrentCell) * Settings->GridUnitSize;
 
-				// Check North (+X)
-				if (GetCell(Grid, x + 1, y, z) == ECellType::None)
-				{
-					const FRotator WallRotation(0.0f, 0.0f, 0.0f);
-					FPCGPoint& WallPoint = Points.Emplace_GetRef();
-					WallPoint.Transform = FTransform(WallRotation, LocalPosition) * TargetActorTransform;
-					WallPoint.MetadataEntry = Metadata->AddEntry();
-					MeshTypeAttr->SetValue(WallPoint.MetadataEntry, TEXT("Wall"));
-				}
-				// Check East (+Y)
-				if (GetCell(Grid, x, y + 1, z) == ECellType::None)
-				{
-					const FRotator WallRotation(0.0f, 90.0f, 0.0f);
-					FPCGPoint& WallPoint = Points.Emplace_GetRef();
-					WallPoint.Transform = FTransform(WallRotation, LocalPosition) * TargetActorTransform;
-					WallPoint.MetadataEntry = Metadata->AddEntry();
-					MeshTypeAttr->SetValue(WallPoint.MetadataEntry, TEXT("Wall"));
-				}
-				// Check South (-X)
-				if (GetCell(Grid, x - 1, y, z) == ECellType::None)
-				{
-					const FRotator WallRotation(0.0f, 180.0f, 0.0f);
-					FPCGPoint& WallPoint = Points.Emplace_GetRef();
-					WallPoint.Transform = FTransform(WallRotation, LocalPosition) * TargetActorTransform;
-					WallPoint.MetadataEntry = Metadata->AddEntry();
-					MeshTypeAttr->SetValue(WallPoint.MetadataEntry, TEXT("Wall"));
-				}
-				// Check West (-Y)
-				if (GetCell(Grid, x, y - 1, z) == ECellType::None)
-				{
-					const FRotator WallRotation(0.0f, -90.0f, 0.0f);
-					FPCGPoint& WallPoint = Points.Emplace_GetRef();
-					WallPoint.Transform = FTransform(WallRotation, LocalPosition) * TargetActorTransform;
-					WallPoint.MetadataEntry = Metadata->AddEntry();
-					MeshTypeAttr->SetValue(WallPoint.MetadataEntry, TEXT("Wall"));
-				}
+            	switch (CellType)
+                {
+                    case ECellType::Room:
+                    case ECellType::Hallway:
+                    {
+                        // For Rooms and Hallways, we generate the boundary surfaces by checking neighbors. The
+                    	// DungeonGenerator only generates full tiles (room, hallway) not ceiling, floors, walls
+                    	// so we have to do some calculations here to identify them.
 
-				if (CellType == ECellType::Stairs)
-				{
-					float Yaw = 0.0f;
-					if (IsCellConnected(Grid, FIntVector(x + 1, y, z)))
-					{
-						Yaw = 0.0f;
-					}
-					else if (IsCellConnected(Grid, FIntVector(x - 1, y, z)))
-					{
-						Yaw = 180.0f;
-					}
-					else if (IsCellConnected(Grid, FIntVector(x, y + 1, z)))
-					{
-						Yaw = 90.0f;
-					}
-					else if (IsCellConnected(Grid, FIntVector(x, y - 1, z)))
-					{
-						Yaw = -90.0f;
-					}
+                        // Check BELOW for Floor
+                        if (GetCellTypeAt(Grid, x, y, z - 1) == ECellType::None || CellType == ECellType::Hallway)
+                        {
+                            FPCGPoint& Point = Points.Emplace_GetRef();
+                            Point.Transform = FTransform(LocalPosition) * TargetActorTransform;
+                            Point.MetadataEntry = Metadata->AddEntry();
+                            MeshTypeAttr->SetValue(Point.MetadataEntry, TEXT("Floor"));
+                        }
 
-					const FRotator StairRotation(0.0f, Yaw, 0.0f);
-					FPCGPoint& StairPoint = Points.Emplace_GetRef();
-					StairPoint.Transform = FTransform(StairRotation, LocalPosition) * TargetActorTransform;
-					StairPoint.MetadataEntry = Metadata->AddEntry();
-					MeshTypeAttr->SetValue(StairPoint.MetadataEntry, TEXT("Stairs"));
-				}
-			}
-		}
-	}
-	FPCGTaggedData& OutputData = Context->OutputData.TaggedData.Emplace_GetRef();
-	OutputData.Data = PointData;
-	OutputData.Pin = PCGPinConstants::DefaultOutputLabel;
+                        // Check ABOVE for Ceiling (+ check to not spawn ceiling if above we have stairs)
+                        bool bIsStairRamp = (GetCellTypeAt(Grid, x, y, z + 1) == ECellType::Stairs);
+                        if (!bIsStairRamp && GetCellTypeAt(Grid, x, y, z + 1) == ECellType::None)
+                        {
+                            const FVector CeilingLocalPos = LocalPosition + FVector(0, 0, Settings->GridUnitSize);
+                            FPCGPoint& Point = Points.Emplace_GetRef();
+                            Point.Transform = FTransform(CeilingLocalPos) * TargetActorTransform;
+                            Point.MetadataEntry = Metadata->AddEntry();
+                            MeshTypeAttr->SetValue(Point.MetadataEntry, TEXT("Ceiling"));
+                        }
+
+                        // Check horizontal neighbors for walls
+                        if (GetCellTypeAt(Grid, x + 1, y, z) == ECellType::None) // North
+                        {
+                            FPCGPoint& Point = Points.Emplace_GetRef();
+                            Point.Transform = FTransform(FRotator(0, 0, 0), LocalPosition) * TargetActorTransform;
+                            Point.MetadataEntry = Metadata->AddEntry();
+                            MeshTypeAttr->SetValue(Point.MetadataEntry, TEXT("Wall"));
+                        }
+                        if (GetCellTypeAt(Grid, x, y + 1, z) == ECellType::None) // East
+                        {
+                            FPCGPoint& Point = Points.Emplace_GetRef();
+                            Point.Transform = FTransform(FRotator(0, 90, 0), LocalPosition) * TargetActorTransform;
+                            Point.MetadataEntry = Metadata->AddEntry();
+                            MeshTypeAttr->SetValue(Point.MetadataEntry, TEXT("Wall"));
+                        }
+                        if (GetCellTypeAt(Grid, x - 1, y, z) == ECellType::None) // South
+                        {
+                            FPCGPoint& Point = Points.Emplace_GetRef();
+                            Point.Transform = FTransform(FRotator(0, 180, 0), LocalPosition) * TargetActorTransform;
+                            Point.MetadataEntry = Metadata->AddEntry();
+                            MeshTypeAttr->SetValue(Point.MetadataEntry, TEXT("Wall"));
+                        }
+                        if (GetCellTypeAt(Grid, x, y - 1, z) == ECellType::None) // West
+                        {
+                            FPCGPoint& Point = Points.Emplace_GetRef();
+                            Point.Transform = FTransform(FRotator(0, -90, 0), LocalPosition) * TargetActorTransform;
+                            Point.MetadataEntry = Metadata->AddEntry();
+                            MeshTypeAttr->SetValue(Point.MetadataEntry, TEXT("Wall"));
+                        }
+                        break;
+                    }
+                    case ECellType::Stairs:
+                    {
+                    	switch (Cell.StairPart)
+                    	{
+                    		case EStairPart::UpperMesh:
+                    			{
+                    				FPCGPoint& Point = Points.Emplace_GetRef();
+                    				Point.Transform = FTransform(Cell.Rotation, LocalPosition - FVector(0,0, Settings->GridUnitSize / 2)) * TargetActorTransform;
+                    				Point.MetadataEntry = Metadata->AddEntry();
+                    				MeshTypeAttr->SetValue(Point.MetadataEntry, TEXT("StairsUpper"));
+                    				break;
+                    			}
+                    		case EStairPart::LowerMesh:
+                    			{
+                    				FPCGPoint& Point = Points.Emplace_GetRef();
+                    				Point.Transform = FTransform(Cell.Rotation, LocalPosition) * TargetActorTransform;
+                    				Point.MetadataEntry = Metadata->AddEntry();
+                    				MeshTypeAttr->SetValue(Point.MetadataEntry, TEXT("StairsLower"));
+                    				break;
+                    		}
+                    		case EStairPart::EmptySpace:
+                    		case EStairPart::None:
+                    		default:
+                    			// Do nothing for empty parts of the stairwell
+                    			break;
+                    	}
+                    }
+                    default:
+                        break;
+                }
+            }
+        }
+    }
+
+    FPCGTaggedData& OutputData = Context->OutputData.TaggedData.Emplace_GetRef();
+    OutputData.Data = PointData;
+    OutputData.Pin = PCGPinConstants::DefaultOutputLabel;
 }
 
 ECellType FDungeonPCGElement::GetCell(const FGrid3D<ECellType>& Grid, int32 x, int32 y, int32 z)
@@ -179,7 +194,7 @@ bool FDungeonPCGElement::ExecuteInternal(FPCGContext* Context) const
 		Settings->RoomHeightInFloorsMinMax,
 		Settings->ExtraConnectionChance);
 	
-	FGrid3D<ECellType> Grid = DungeonGenerator->GenerateDungeon();
+	FGrid3D<FCellData> Grid = DungeonGenerator->GenerateDungeon();
 	
 	GeneratePCGAttributes(Grid, Context, Settings);
 	return true;

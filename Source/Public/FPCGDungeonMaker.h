@@ -48,8 +48,9 @@ class FDungeonPCGElement : public IPCGElement
 protected:
 	static bool IsCellConnected(const FGrid3D<ECellType>& Grid, FIntVector CellCoord);
 	static ECellType GetCell(const FGrid3D<ECellType>& Grid, int32 x, int32 y, int32 z);
+	static ECellType GetCellTypeAt(const FGrid3D<FCellData>& Grid, int32 x, int32 y, int32 z);
 
-	static void GeneratePCGAttributes(FGrid3D<ECellType>& Grid, FPCGContext* Context, const UDungeonPCGSettings* Settings);
+	static void GeneratePCGAttributes(const FGrid3D<FCellData>& Grid, FPCGContext* Context, const UDungeonPCGSettings* Settings);
 
 	virtual EPCGElementExecutionLoopMode ExecutionLoopMode(const UPCGSettings* Settings) const override { return EPCGElementExecutionLoopMode::SinglePrimaryPin; }
 	virtual bool ExecuteInternal(FPCGContext* Context) const override;

@@ -31,11 +31,11 @@ void UDungeonGenerator::ClearDungeon()
 	DungeonRooms.Empty();
 }
 
-FGrid3D<ECellType> UDungeonGenerator::GenerateDungeon()
+FGrid3D<FCellData> UDungeonGenerator::GenerateDungeon()
 {
 	ClearDungeon();
-	Grid = FGrid3D<ECellType>(FIntVector(GridSize.X, GridSize.Y, GridSize.Z),
-	                          [](const FIntVector& Pos) { return None; }, FIntVector::ZeroValue);
+	Grid = FGrid3D<FCellData>(FIntVector(GridSize.X, GridSize.Y, GridSize.Z),
+	                          [](const FIntVector& Pos) { return FCellData(); }, FIntVector::ZeroValue);
 	PlaceRooms();
 	CalculateDelaunayTetrahedralization();
 	CalculateMst();
@@ -118,7 +118,8 @@ void UDungeonGenerator::PlaceRooms()
 				{
 					for (int32 x = NewRoom.Bounds.Min.X; x < NewRoom.Bounds.Max.X; ++x)
 					{
-						Grid(x, y, z) = Room;
+						FCellData RoomCell(ECellType::Room, FRotator(0, 0, 0));
+						Grid(x, y, z) = RoomCell;
 					}
 				}
 			}
@@ -135,20 +136,20 @@ FPathCost UDungeonGenerator::CalculateHallwayPathCost(const FPathNode* Current, 
 	if (Delta.Z == 0) // Flat hallway
 	{
 		PathCost.Cost = FVector::Dist(FVector(Neighbor->Position), FVector(GoalRoom.GridCenter));
-		const ECellType NeighborNodeType = Grid(Neighbor->Position);
+		const FCellData NeighborNodeType = Grid(Neighbor->Position);
 
-		if (NeighborNodeType == Stairs)
+		if (NeighborNodeType.Type == ECellType::Stairs)
 		{
 			return PathCost;
 		}
 
-		switch (NeighborNodeType)
+		switch (NeighborNodeType.Type)
 		{
-		case None:
-		case Hallway:
+		case ECellType::None:
+		case ECellType::Hallway:
 			PathCost.Cost += 1;
 			break;
-		case Room:
+		case ECellType::Room:
 			PathCost.Cost += 5; // Higher cost to discourage pathing through rooms
 			break;
 		default:
@@ -159,10 +160,10 @@ FPathCost UDungeonGenerator::CalculateHallwayPathCost(const FPathNode* Current, 
 	else
 	{
 		// if Delta is vertical, then we have a staircase
-		const ECellType CurrentNodeType = Grid(Current->Position);
-		const ECellType NeighborNodeType = Grid(Neighbor->Position);
-		if ((CurrentNodeType != None && CurrentNodeType != Hallway) ||
-			(NeighborNodeType != None && NeighborNodeType != Hallway))
+		const ECellType CurrentNodeType = Grid(Current->Position).Type;
+		const ECellType NeighborNodeType = Grid(Neighbor->Position).Type;
+		if ((CurrentNodeType != ECellType::None && CurrentNodeType != ECellType::Hallway) ||
+			(NeighborNodeType != ECellType::None && NeighborNodeType != ECellType::Hallway))
 		{
 			return PathCost;
 		}
@@ -183,10 +184,10 @@ FPathCost UDungeonGenerator::CalculateHallwayPathCost(const FPathNode* Current, 
 		}
 
 		// Ensure the landing area is clear
-		if (Grid(Current->Position + HorizontalOffset) != None ||
-			Grid(Current->Position + HorizontalOffset * 2) != None ||
-			Grid(Current->Position + VerticalOffset + HorizontalOffset) != None ||
-			Grid(Current->Position + VerticalOffset + HorizontalOffset * 2) != None)
+		if (Grid(Current->Position + HorizontalOffset).Type != ECellType::None ||
+			Grid(Current->Position + HorizontalOffset * 2).Type != ECellType::None ||
+			Grid(Current->Position + VerticalOffset + HorizontalOffset).Type != ECellType::None ||
+			Grid(Current->Position + VerticalOffset + HorizontalOffset * 2).Type != ECellType::None)
 		{
 			return PathCost;
 		}
@@ -359,7 +360,6 @@ void UDungeonGenerator::PathfindHallways()
 	{
 		return this->GridToWorld(Pos);
 	});
-	
 			
 	// Calculate and draw everything instantly with no visualization
 	for (int32 i = 0; i < HallwayEdges.Num(); ++i)
@@ -395,44 +395,80 @@ void UDungeonGenerator::ProcessPath(TArray<FIntVector> Path)
 {
 	if (!Path.IsEmpty())
 	{
-		const FVector ActorLocation = OwningActor->GetActorLocation();
-		const FVector CellScale(GridUnitSize / 100.f, GridUnitSize / 100.f, GridUnitSize / 100.f);
-
 		for (int32 i = 0; i < Path.Num(); i++)
 		{
 			FIntVector CurrentPathPoint = Path[i];
 			FIntVector PreviousPoint = (i > 0) ? Path[i - 1] : Path[i];
 
 			// Process the current tile as a hallway
-			if (Grid.InBounds(CurrentPathPoint) && Grid(CurrentPathPoint) == None)
+			if (Grid.InBounds(CurrentPathPoint) && Grid(CurrentPathPoint).Type == ECellType::None)
 			{
-				Grid(CurrentPathPoint) = Hallway;
+				FCellData HallwayData;
+				HallwayData.Type = ECellType::Hallway;
+				Grid(CurrentPathPoint) = HallwayData;
 			}
 
-			// Process stairs if there's a vertical change from the previous tile
 			if (i == 0) continue;
 			
 			FIntVector Delta = CurrentPathPoint - PreviousPoint;
+
 			if (Delta.Z != 0)
 			{
+				// (delta.y, delta.x) instead of (delta.x, delta.y) considers X as the "forward" axis instead of Y. This means the mesh
+				// should face X as foreard dir (and pivot at center as the other meshes).
+				
+				float Yaw = FMath::RadiansToDegrees(FMath::Atan2(static_cast<float>(Delta.Y), static_cast<float>(Delta.X)));
+				const bool bIsAscending = Delta.Z > 0;
+
+				if (!bIsAscending)
+				{
+					Yaw += 180.0f;
+				}
+				
+				const FRotator StairRotation(0.0f, FMath::UnwindDegrees(Yaw), 0.0f);
+            
 				const int32 XDir = FMath::Clamp(Delta.X, -1, 1);
 				const int32 YDir = FMath::Clamp(Delta.Y, -1, 1);
-				const FIntVector VerticalOffset(0, 0, Delta.Z);
 				const FIntVector HorizontalOffset(XDir, YDir, 0);
-
-				FIntVector StairTiles[] = {
-					PreviousPoint + HorizontalOffset,
-					PreviousPoint + HorizontalOffset * 2,
-					PreviousPoint + VerticalOffset + HorizontalOffset,
-					PreviousPoint + VerticalOffset + HorizontalOffset * 2
-				};
-
-				for (const FIntVector& StairTile : StairTiles)
+				
+            
+				// Define the tile locations for the stair parts
+				FIntVector Lower1 = PreviousPoint + HorizontalOffset;
+				FIntVector Lower2 = PreviousPoint + HorizontalOffset * 2;
+				FIntVector Upper1 = PreviousPoint + FIntVector(0, 0, Delta.Z) + HorizontalOffset;
+				FIntVector Upper2 = PreviousPoint + FIntVector(0, 0, Delta.Z) + HorizontalOffset * 2;
+                        
+				
+				if (Grid.InBounds(Lower1))
 				{
-					if (Grid.InBounds(StairTile))
-					{
-						Grid(StairTile) = Stairs;
-					}
+					FCellData& Cell = Grid(Lower1);
+					Cell.Type = ECellType::Stairs;
+					Cell.Rotation = StairRotation;
+					Cell.StairPart = bIsAscending ? EStairPart::LowerMesh : EStairPart::UpperMesh;
+				}
+				
+				if (Grid.InBounds(Upper2))
+				{
+					FCellData& Cell = Grid(Upper2);
+					Cell.Type = ECellType::Stairs;
+					Cell.Rotation = StairRotation;
+					Cell.StairPart = bIsAscending ? EStairPart::UpperMesh : EStairPart::LowerMesh;
+				}
+                        
+				// prevent floor/ceiling generation
+				if (Grid.InBounds(Lower2))
+				{
+					FCellData& Cell = Grid(Lower2);
+					Cell.Type = ECellType::Stairs;
+					Cell.Rotation = StairRotation;
+					Cell.StairPart = EStairPart::EmptySpace;
+				}
+				if (Grid.InBounds(Upper1))
+				{
+					FCellData& Cell = Grid(Upper1);
+					Cell.Type = ECellType::Stairs;
+					Cell.Rotation = StairRotation;
+					Cell.StairPart = EStairPart::EmptySpace;
 				}
 			}
 		}
